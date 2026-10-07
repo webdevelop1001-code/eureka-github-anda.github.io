@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FreshDrop</title>
+<style>
+:root{--bg:#faf8fa;--ink:#2b2430;--mute:#6f6578;--acc:#7a2e58;--line:#e3dce6;--err:#b3261e}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:520px;margin:0 auto;padding:16px}
+h1{font:700 1.5rem Georgia,serif;letter-spacing:.14em;margin:0}
+.sub{margin:2px 0 8px;color:var(--mute);font-size:.9rem}
+.strip{display:flex;height:6px;border-radius:3px;overflow:hidden;margin-bottom:14px}.strip i{flex:1}
+.tagrow{font-size:1.05rem;margin:8px 0 14px}
+.badge{margin-left:8px;padding:2px 10px;border:1px solid var(--acc);border-radius:99px;color:var(--acc);font-size:.8rem}
+label{display:block;margin:12px 0 4px;font-size:.9rem;color:var(--mute)}
+input,select,textarea{width:100%;padding:11px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}
+button{width:100%;margin-top:12px;padding:14px;border:0;border-radius:10px;background:var(--acc);color:#fff;font:600 1rem inherit;cursor:pointer}
+button.ghost{background:#fff;color:var(--acc);border:1px solid var(--acc)}
+button:disabled{opacity:.5}
+.row{display:flex;gap:10px}
+.err{padding:10px 12px;border-left:4px solid var(--err);background:#fdecea;color:var(--err);border-radius:4px}
+.ok{padding:10px 12px;border-left:4px solid var(--acc);background:#f3e9ef;border-radius:4px}
+.big{font:700 2.4rem Georgia,serif;color:var(--acc);margin:6px 0}
+.stage{position:relative;background:#000;border-radius:10px;overflow:hidden}
+.stage video,.stage canvas{display:block;width:100%;height:100%}
+.guide{position:absolute;border:2px solid #fff;box-shadow:0 0 0 999px rgba(0,0,0,.45)}
+.roi{position:absolute;border:1.5px solid #ffd54f}
+.roi span{position:absolute;top:-1.1em;left:0;font-size:10px;color:#ffd54f}
+ul{list-style:none;padding:0;margin:8px 0}
+li{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)}
+table{border-collapse:collapse;font-size:.75rem;white-space:nowrap}
+td,th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left}
+.scroll{overflow-x:auto}
+.small{font-size:.85rem;color:var(--mute)}
+</style></head>
+<body><main>
+<header>
+ <h1>FRESHDROP</h1>
+ <p class="sub">Invisible Change → Visible Information</p>
+ <div class="strip"><i style="background:#673AB7"></i><i style="background:#DB4081"></i><i style="background:#A19A52"></i><i style="background:#6EAA57"></i></div>
+</header>
+<p class="tagrow">Tag: <b id="tid">–</b><span class="badge" id="st" hidden></span></p>
+<p class="err" id="err" hidden></p>
+
+<section class="view" id="home" hidden>
+ <div id="homeact"></div>
+ <ul id="hist"></ul>
+ <button class="ghost" id="btnData" hidden>Research Data</button>
+ <button class="ghost" id="btnTest">Camera test</button>
+</section>
+
+<section class="view" id="form" hidden>
+ <label>Food Category</label><input id="f_food" value="Poultry / Chicken" readonly>
+ <label>Sample ID</label><input id="f_sample" placeholder="e.g. CH-01" maxlength="60">
+ <label>Container ID</label><input id="f_cont" placeholder="e.g. C-01" maxlength="60">
+ <label>Storage Condition</label>
+ <select id="f_store"><option>Refrigerated</option><option>Room-temperature experimental condition</option><option>Other experimental condition</option></select>
+ <label>Measured Temperature °C (optional)</label><input id="f_temp" type="number" step="0.1" inputmode="decimal">
+ <label>Notes (optional)</label><textarea id="f_notes" rows="2" maxlength="500"></textarea>
+ <p class="small">Start time is recorded automatically.</p>
+ <button id="btnToBase">CONTINUE TO BASELINE</button>
+</section>
+
+<section class="view" id="cam" hidden>
+ <h2 id="camTitle" style="font-size:1.1rem;margin:0 0 6px"></h2>
+ <p class="small">Place the entire tag inside the white frame. ACTIVE and R1–R4 must be visible. The yellow boxes show where colors are sampled.</p>
+ <div class="stage" id="vw"><video id="v" playsinline muted autoplay></video><div class="guide" id="guide"></div></div>
+ <label>Imaging condition (optional)</label><input id="imgcond" placeholder="e.g. photo box, LED 5000 K" maxlength="120">
+ <button id="btnCap">Capture Photo</button>
+ <button class="ghost" id="btnCamBack">Cancel</button>
+</section>
+
+<section class="view" id="review" hidden>
+ <div class="stage" id="pvw"><canvas id="pv"></canvas></div>
+ <div class="scroll"><table id="vals"></table></div>
+ <div class="row"><button class="ghost" id="btnRetake">Retake</button><button id="btnUse">Use Photo</button></div>
+</section>
+
+<section class="view" id="result" hidden>
+ <div id="resBody"></div>
+ <button id="btnResHome">View History</button>
+</section>
+
+<section class="view" id="data" hidden>
+ <p class="small">All stored measurements for this tag (RAW values are never overwritten).</p>
+ <div class="scroll" id="dataTbl"></div>
+ <button id="btnCsv">Export CSV</button>
+ <button class="ghost" id="btnDataBack">Back</button>
+</section>
+</main>
+
+<script>
+/* ============ CONFIG — all tunable values live here ============ */
+const CONFIG = {
+  apiUrl: "",                    // PASTE the Apps Script Web App URL here (ends with /exec)
+  version: "fd-web-1.0",
+  calibration: { method: "none", version: "0" },   // see CORRECTIONS below
+  whitePoint: { X: 0.95047, Y: 1.0, Z: 1.08883 },  // D65, 2° observer (sRGB standard)
+  guide: { aspect: 5 / 3, widthFrac: 0.84 },       // tag is 50 x 30 mm; frame covers 84% of image width
+  roiInset: 0.25,                // sample only the central 50% of each ROI (avoid edges/shadows)
+  // ROI = fractions of the cropped TAG image (x, y, w, h in 0..1).
+  // PLACEHOLDER layout: adjust after checking the yellow boxes on a real printed tag.
+  roi: {
+    active: { x: .06, y: .333, w: .20, h: .333 },
+    r1: { x: .34, y: .12, w: .12, h: .20 }, r2: { x: .52, y: .12, w: .12, h: .20 },
+    r3: { x: .34, y: .58, w: .12, h: .20 }, r4: { x: .52, y: .58, w: .12, h: .20 }
+  },
+  // Target colors of R1–R4. Digital PROTOTYPE values — NOT the measured printed colors.
+  // Replace with values characterized under the reference imaging condition.
+  refTargets: { r1: "#673AB7", r2: "#DB4081", r3: "#A19A52", r4: "#6EAA57" }
+};
+const KEYS = ["active", "r1", "r2", "r3", "r4"];
+const CH = ["r", "g", "b"];
+
+/* ============ Color science (isolated, testable) ============ */
+function srgbToLab(rgb) {            // sRGB(0-255) -> linear -> XYZ(D65) -> CIELAB
+  const lin = c => { c /= 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+  const [r, g, b] = rgb.map(lin);
+  const X = 0.4124564 * r + 0.3575761 * g + 0.1804375 * b;
+  const Y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b;
+  const Z = 0.0193339 * r + 0.1191920 * g + 0.9503041 * b;
+  const W = CONFIG.whitePoint, e = 216 / 24389, k = 24389 / 27;
+  const t = u => u > e ? Math.cbrt(u) : (k * u + 16) / 116;
+  const fx = t(X / W.X), fy = t(Y / W.Y), fz = t(Z / W.Z);
+  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
+}
+const dE76 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);   // CIE76 ΔE*ab
+(function selfTest() {   // known values: white = (100,0,0); sRGB red ≈ (53.24, 80.09, 67.20)
+  const w = srgbToLab([255, 255, 255]), r = srgbToLab([255, 0, 0]);
+  console.assert(Math.abs(w[0] - 100) < 0.01 && Math.abs(w[1]) < 0.01 && Math.abs(w[2]) < 0.01, "Lab white test failed");
+  console.assert(Math.abs(r[0] - 53.24) < 0.05 && Math.abs(r[1] - 80.09) < 0.1 && Math.abs(r[2] - 67.2) < 0.1, "Lab red test failed");
+})();
+
+/* ============ Reference correction (modular — final method decided from experiments) ============ */
+const CORRECTIONS = {
+  none: active => active.slice()     // identity: corrected = RAW. Add experimental methods here.
+};
+function correctColor(active, observedRefs, targetRefs, method) {
+  const f = CORRECTIONS[method];
+  if (!f) throw new Error("Unknown correction method: " + method);
+  return f(active, observedRefs, targetRefs);
+}
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+/* ============ Helpers ============ */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const S = { tag: null, history: [], meta: null, mode: "baseline", canvas: null, an: null };
+const tagId = (new URLSearchParams(location.search).get("id") || "").trim().toUpperCase();
+const validId = /^FD-P-0(0[1-9]|1\d|2[0-4])$/.test(tagId);
+function show(id) { document.querySelectorAll(".view").forEach(s => s.hidden = s.id !== id); }
+function fail(m) { $("err").textContent = m; $("err").hidden = false; }
+function clearErr() { $("err").hidden = true; }
+
+async function api(action, data = {}) {
+  if (!CONFIG.apiUrl) throw new Error("Backend URL is not set. Edit CONFIG.apiUrl in index.html.");
+  const write = action === "activate" || action === "saveScan";
+  let res;
+  try {
+    res = await fetch(write ? CONFIG.apiUrl : CONFIG.apiUrl + "?" + new URLSearchParams({ action, ...data }),
+      write ? { method: "POST", body: JSON.stringify({ action, ...data }) } : {});   // text/plain avoids CORS preflight
+  } catch (e) { throw new Error("Cannot reach the backend. Check your internet connection."); }
+  const j = await res.json().catch(() => null);
+  if (!j || !j.ok) throw new Error((j && j.error) || "Backend error.");
+  return j;
+}
+
+/* ============ Camera ============ */
+let stream = null;
+function stopCam() { if (stream) stream.getTracks().forEach(t => t.stop()); stream = null; }
+function roiBoxes(parent) {
+  Object.entries(CONFIG.roi).forEach(([k, r]) => {
+    const d = document.createElement("div"); d.className = "roi";
+    d.style.cssText = `left:${r.x * 100}%;top:${r.y * 100}%;width:${r.w * 100}%;height:${r.h * 100}%`;
+    d.innerHTML = `<span>${k.toUpperCase()}</span>`; parent.appendChild(d);
+  });
+}
+async function openCamera() {
+  clearErr(); show("cam");
+  $("camTitle").textContent = S.mode === "baseline" ? "Capture Initial Baseline" : S.mode === "current" ? "Scan Current Condition" : "Camera test";
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail("Camera is unavailable. Open this page over HTTPS in a modern browser.");
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+  } catch (e) {
+    return fail(e.name === "NotAllowedError" ? "Camera permission denied. Allow camera access for this site in the browser settings, then reload." :
+      e.name === "NotFoundError" ? "No camera found on this device." : "Camera error: " + e.name);
+  }
+  const v = $("v"); v.srcObject = stream; await v.play().catch(() => { });
+  v.onloadedmetadata = placeGuide; placeGuide();
+}
+function guideRect(vw, vh) {
+  const w = CONFIG.guide.widthFrac * vw, h = w / CONFIG.guide.aspect;
+  return { x: (vw - w) / 2, y: (vh - h) / 2, w, h };
+}
+function placeGuide() {
+  const v = $("v"), vw = v.videoWidth, vh = v.videoHeight; if (!vw) return;
+  $("vw").style.aspectRatio = vw + "/" + vh;
+  const g = guideRect(vw, vh), el = $("guide");
+  el.style.cssText = `left:${g.x / vw * 100}%;top:${g.y / vh * 100}%;width:${g.w / vw * 100}%;height:${g.h / vh * 100}%`;
+  el.innerHTML = ""; roiBoxes(el);
+}
+function captureTag() {                     // crops the frame to the guide = the tag image (RAW pixels)
+  const v = $("v"), g = guideRect(v.videoWidth, v.videoHeight), c = document.createElement("canvas");
+  c.width = Math.round(g.w); c.height = Math.round(g.h);
+  c.getContext("2d").drawImage(v, g.x, g.y, g.w, g.h, 0, 0, c.width, c.height);
+  return c;
+}
+
+/* ============ Image processing ============ */
+function roiMedian(ctx, W, H, r) {            // per-channel median of the central ROI area
+  const i = CONFIG.roiInset, x0 = Math.round((r.x + r.w * i) * W), y0 = Math.round((r.y + r.h * i) * H);
+  const w = Math.round(r.w * (1 - 2 * i) * W), h = Math.round(r.h * (1 - 2 * i) * H);
+  if (x0 < 0 || y0 < 0 || w < 2 || h < 2 || x0 + w > W || y0 + h > H)
+    throw new Error("A sampling region falls outside the image. Retake the photo or adjust CONFIG.roi.");
+  const d = ctx.getImageData(x0, y0, w, h).data, ch = [[], [], []];
+  for (let p = 0; p < d.length; p += 4) { ch[0].push(d[p]); ch[1].push(d[p + 1]); ch[2].push(d[p + 2]); }
+  return ch.map(a => { a.sort((m, n) => m - n); const k = a.length >> 1; return a.length % 2 ? a[k] : (a[k - 1] + a[k]) / 2; });
+}
+function analyze(canvas) {
+  const ctx = canvas.getContext("2d"), raw = {};
+  KEYS.forEach(k => raw[k] = roiMedian(ctx, canvas.width, canvas.height, CONFIG.roi[k]));
+  const refs = ["r1", "r2", "r3", "r4"];
+  const corr = correctColor(raw.active, refs.map(k => raw[k]), Object.fromEntries(refs.map(k => [k, hex(CONFIG.refTargets[k])])), CONFIG.calibration.method);
+  return { raw, corr, lab: srgbToLab(corr) };
+}
+function buildScan(type, an, base) {
+  const p = {
+    tag_id: tagId, scan_type: type, timestamp: new Date().toISOString(), imaging_condition: $("imgcond").value.trim(),
+    delta_e: type === "BASELINE" ? 0 : dE76(an.lab, [base.active_L, base.active_a, base.active_b]),
+    delta_e_metric: "CIE76", calibration_method: CONFIG.calibration.method, calibration_version: CONFIG.calibration.version + "|" + CONFIG.version
+  };
+  KEYS.forEach(k => CH.forEach((c, i) => p[`${k}_raw_${c}`] = an.raw[k][i]));
+  CH.forEach((c, i) => p["active_corr_" + c] = an.corr[i]);
+  [p.active_L, p.active_a, p.active_b] = an.lab;
+  return p;
+}
+
+/* ============ Screens ============ */
+function showReview() {
+  stopCam(); S.canvas = captureTag();
+  const pv = $("pv"); pv.width = S.canvas.width; pv.height = S.canvas.height;
+  pv.getContext("2d").drawImage(S.canvas, 0, 0);
+  document.querySelectorAll("#pvw .roi").forEach(e => e.remove()); roiBoxes($("pvw"));
+  try { S.an = analyze(S.canvas); } catch (e) { S.an = null; fail(e.message); }
+  $("vals").innerHTML = S.an ? "<tr><th></th><th>R</th><th>G</th><th>B</th></tr>" + KEYS.map(k =>
+    `<tr><td>${k.toUpperCase()}</td>${S.an.raw[k].map(x => `<td>${x.toFixed(1)}</td>`).join("")}</tr>`).join("") : "";
+  $("btnUse").disabled = !S.an; show("review");
+}
+async function useAndSave() {
+  if (S.mode === "test") { $("resBody").innerHTML = `<p class="ok">Camera test OK. Photo captured and RAW RGB read.</p>`; return show("result"); }
+  const btn = $("btnUse"); btn.disabled = true; clearErr();
+  try {
+    const base = S.history.find(r => r.scan_type === "BASELINE");
+    if (S.mode === "current" && !base) throw new Error("Baseline for this tag is missing in the database.");
+    const scan = buildScan(S.mode === "baseline" ? "BASELINE" : "CURRENT", S.an, base);
+    if (S.mode === "baseline") {
+      await api("activate", { tag_id: tagId, ...S.meta, scan });
+      $("resBody").innerHTML = `<p class="ok"><b>TAG ACTIVATED</b></p><p>Tag ${esc(tagId)}<br>Sample ${esc(S.meta.sample_id)}<br>${esc(S.meta.activation_timestamp)}</p>`;
+    } else {
+      await api("saveScan", { tag_id: tagId, scan });
+      $("resBody").innerHTML = `<p class="small">Color Change</p><div class="big">ΔE*ab = ${scan.delta_e.toFixed(2)}</div>
+        <p>Color change measured relative to this tag's initial baseline (CIE76).</p>
+        <p class="small">Tag ${esc(tagId)} · Sample ${esc(S.tag.sample_id)}<br>${esc(scan.timestamp)}</p>`;
+    }
+    show("result");
+  } catch (e) { fail("Not saved: " + e.message); btn.disabled = false; }
+}
+function renderHistory() {
+  const rows = S.history;
+  $("hist").innerHTML = rows.map((r, i) => `<li><span>T${i} · ${esc(r.timestamp)}</span><b>ΔE ${(+r.delta_e).toFixed(2)}</b></li>`).join("");
+}
+function renderData() {
+  const rows = S.history; if (!rows.length) { $("dataTbl").textContent = "No data."; return; }
+  const cols = Object.keys(rows[0]);
+  $("dataTbl").innerHTML = "<table><tr>" + cols.map(c => `<th>${esc(c)}</th>`).join("") + "</tr>" +
+    rows.map(r => "<tr>" + cols.map(c => `<td>${esc(r[c])}</td>`).join("") + "</tr>").join("") + "</table>";
+}
+function exportCsv() {
+  const rows = S.history; if (!rows.length) return;
+  const cols = Object.keys(rows[0]), q = v => '"' + String(v).replace(/"/g, '""') + '"';
+  const csv = [cols.join(",")].concat(rows.map(r => cols.map(c => q(r[c])).join(","))).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = tagId + "_scans.csv"; a.click();
+}
+async function loadTag() {
+  clearErr(); show("home"); $("homeact").innerHTML = "<p class='small'>Loading…</p>";
+  try {
+    S.tag = (await api("getTag", { tag_id: tagId })).tag;
+    const active = S.tag.status === "ACTIVE";
+    $("st").textContent = active ? "ACTIVE" : "NOT ACTIVATED"; $("st").hidden = false;
+    S.history = active ? (await api("getHistory", { tag_id: tagId })).scans : [];
+    $("homeact").innerHTML = active
+      ? `<p class="small">Sample ${esc(S.tag.sample_id)} · Container ${esc(S.tag.container_id)}</p><button id="btnCur">Scan Current Condition</button>`
+      : `<button id="btnAct">Activate this tag</button>`;
+    if (active) $("btnCur").onclick = () => { S.mode = "current"; openCamera(); }; else $("btnAct").onclick = () => show("form");
+    renderHistory(); $("btnData").hidden = !active;
+  } catch (e) { $("homeact").innerHTML = ""; fail(e.message); }
+}
+
+/* ============ Wiring ============ */
+$("btnTest").onclick = () => { S.mode = "test"; openCamera(); };
+$("btnCap").onclick = showReview;
+$("btnCamBack").onclick = () => { stopCam(); clearErr(); show("home"); };
+$("btnRetake").onclick = () => { clearErr(); openCamera(); };
+$("btnUse").onclick = useAndSave;
+$("btnResHome").onclick = () => validId ? (S.mode === "test" ? show("home") : loadTag()) : show("home");
+$("btnData").onclick = () => { renderData(); show("data"); };
+$("btnDataBack").onclick = () => show("home");
+$("btnCsv").onclick = exportCsv;
+$("btnToBase").onclick = () => {
+  clearErr();
+  const s = $("f_sample").value.trim(), c = $("f_cont").value.trim(), t = $("f_temp").value.trim();
+  if (!s || !c) return fail("Sample ID and Container ID are required.");
+  if (t !== "" && !isFinite(Number(t))) return fail("Temperature must be a number, or leave it empty.");
+  S.meta = { food_category: "Poultry / Chicken", sample_id: s, container_id: c, storage_condition: $("f_store").value,
+    measured_temperature: t === "" ? "" : Number(t), activation_timestamp: new Date().toISOString(), notes: $("f_notes").value.trim() };
+  S.mode = "baseline"; openCamera();
+};
+if (validId) { $("tid").textContent = tagId; loadTag(); }
+else { $("tid").textContent = tagId || "none"; show("home"); $("homeact").innerHTML = ""; $("btnTest").hidden = false;
+  fail(tagId ? "Invalid Tag ID. Valid IDs are FD-P-001 to FD-P-024." : "No Tag ID. Scan a tag QR code, or add ?id=FD-P-001 to the address."); }
+</script>
+</body></html>
